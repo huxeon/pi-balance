@@ -9,7 +9,6 @@
   ],
   "files": [
     "src",
-    "auth.example.json",
     "README.md"
   ],
   "engines": {
