@@ -70,5 +70,5 @@ npm test
 临时加载本地代码：
 
 ```sh
-pi -e ./extensions/index.ts
+pi -e ./index.ts
 ```

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import type { BalancePanel } from "../src/ui.ts";
-import extension from "../extensions/index.ts";
+import extension from "../index.ts";
 
 function harness(resolveKey: (provider: string) => Promise<string | undefined>) {
   const notices: string[] = [];

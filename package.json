@@ -8,7 +8,7 @@
     "deepseek"
   ],
   "files": [
-    "extensions",
+    "index.ts",
     "src",
     "README.md"
   ],
@@ -17,7 +17,7 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/index.ts"
+      "./index.ts"
     ]
   },
   "scripts": {

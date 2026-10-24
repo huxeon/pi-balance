@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { BalanceError, fetchBalance, formatBalance } from "../src/balance.ts";
-import { BalancePanel } from "../src/ui.ts";
+import { BalanceError, fetchBalance, formatBalance } from "./src/balance.ts";
+import { BalancePanel } from "./src/ui.ts";
 
 export default function balanceExtension(pi: ExtensionAPI): void {
   let pending: AbortController | undefined;
