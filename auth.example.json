@@ -1,0 +1,6 @@
+{
+  "deepseek": {
+    "type": "api_key",
+    "key": "sk-replace-with-your-deepseek-api-key"
+  }
+}

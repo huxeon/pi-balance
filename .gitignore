@@ -1,0 +1,6 @@
+node_modules/
+.pi/auth.json
+auth.json
+.pi/balance.json
+balance.json
+*.tsbuildinfo
