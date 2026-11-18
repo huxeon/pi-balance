@@ -1,8 +1,9 @@
 # pi-balance
 
-在 [Pi](https://pi.dev) 中查看 DeepSeek 账户余额的轻量扩展。
+在 [Pi](https://pi.dev) 中查看当前模型所属提供商的余额或订阅额度。
 
-输入 `/balance`，即可查看可用余额、赠金和充值余额，无需离开终端。界面跟随 Pi 主题，支持手动刷新，不依赖当前使用的模型。
+- **DeepSeek**：查看总余额、赠金和充值余额（CNY / USD）。
+- **OpenAI Codex**：查看 ChatGPT 套餐、各额度窗口的剩余百分比和重置时间；有可用 credits 时单独展示。
 
 ## 安装
 
@@ -10,27 +11,24 @@
 pi install git:github.com/huxeon/pi-balance
 ```
 
-安装后，在 Pi 中执行 `/reload` 或重新启动。
+安装后，在 Pi 中执行 `/reload` 或重新启动。需要 Node.js 22.19+，基于 Pi 1.4.0 开发和测试。
 
-需要 Node.js 22.19+，基于 Pi 1.4.0 开发和测试。
+## 配置与使用
 
-## 配置
-
-复用 Pi 中已有的 DeepSeek API Key，无需额外配置文件。如果尚未配置，在 Pi 中执行：
-
-```text
-/login deepseek
-```
-
-也可以在启动 Pi 前设置 `DEEPSEEK_API_KEY` 环境变量。即使当前使用其他提供商的模型，也可以查询 DeepSeek 余额。
-
-## 使用
+用 `/model` 选中 DeepSeek 或 OpenAI Codex 的模型，然后执行：
 
 ```text
 /balance
 ```
 
-也支持 `/balance deepseek`。
+命令不带参数，只查询**当前模型的提供商**。如果尚未选中模型，或当前提供商不受支持（例如 `openai`，不是 `openai-codex`），会显示提示，不发起请求。
+
+扩展复用 Pi 中已有的登录凭据，无需额外配置文件：
+
+- **DeepSeek**：在 Pi 中运行 `/login deepseek`，或在启动前设置 `DEEPSEEK_API_KEY`。
+- **OpenAI Codex**：在 Pi 中运行 `/login openai-codex`，使用 ChatGPT OAuth 登录；不支持用 OpenAI API Key 查询 Codex 订阅额度。
+
+### DeepSeek
 
 ```text
 ────────────────────────────────────────────────────────────
@@ -45,15 +43,30 @@ pi install git:github.com/huxeon/pi-balance
 ────────────────────────────────────────────────────────────
 ```
 
-- **刷新**：按 `Enter` 或 `r`。
+### OpenAI Codex
+
+```text
+────────────────────────────────────────────────────────────
+
+ Codex usage · Plus
+
+ 5-hour  ████████░░   82% left   Resets today at 13:10
+ Weekly  █████████░   97% left   Resets Nov 25 at 08:11
+
+ enter/r refresh  escape/ctrl+c close
+
+────────────────────────────────────────────────────────────
+```
+
+Codex 按接口返回的时长命名额度窗口，重置时间用本地时区。窄终端不显示进度条。Credits 和订阅额度分开显示，不按货币换算。
+
+- **刷新**：按 `Enter` 或 `r`；失败后可重试。
 - **关闭**：按 `Esc` 或 `Ctrl+C`；加载中关闭会取消查询。
 - **自定义快捷键**：确认和关闭键遵循 Pi 设置，面板提示同步更新。
-- **多币种**：分别展示接口返回的 CNY、USD 余额，不做汇率换算。
-- **查询失败**：在面板中显示提示，可按刷新键重试。
 
-余额仅在打开面板或手动刷新时查询，不会后台轮询，也不会保存余额历史。请求发送至 [DeepSeek 官方余额接口](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)，API Key 不会显示在界面中。
+仅在打开面板或手动刷新时发起查询，不会后台轮询，也不保存历史。DeepSeek 使用[官方余额接口](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)；Codex 使用 [Codex CLI 同款额度接口](https://github.com/openai/codex/pull/10973) `https://chatgpt.com/backend-api/wham/usage`，该接口不是公开稳定的 API。凭据不会显示在界面中。
 
-RPC 模式下以文本通知展示结果；无 UI 模式下不执行查询。
+RPC 模式以文本通知展示结果；无 UI 模式不执行查询。
 
 ## 本地开发
 
@@ -65,9 +78,7 @@ npm run check
 npm test
 ```
 
-测试使用模拟数据，无需真实 API Key，也不会发出实际余额请求。
-
-临时加载本地代码：
+测试使用模拟数据，无需真实凭据，也不会发出实际余额请求。临时加载本地代码：
 
 ```sh
 pi -e ./index.ts

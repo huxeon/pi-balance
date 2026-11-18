@@ -7,6 +7,7 @@ import extension from "../index.ts";
 
 function harness(resolveKey: (provider: string) => Promise<string | undefined>) {
   const notices: string[] = [];
+  const severities: (string | undefined)[] = [];
   const statuses: (string | undefined)[] = [];
   let handler!: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
   let shutdown!: () => void;
@@ -23,9 +24,13 @@ function harness(resolveKey: (provider: string) => Promise<string | undefined>) 
   const ctx = {
     hasUI: true,
     mode: "rpc",
+    model: { provider: "deepseek" },
     modelRegistry: { getApiKeyForProvider: resolveKey },
     ui: {
-      notify(message: string) { notices.push(message); },
+      notify(message: string, severity?: string) {
+        notices.push(message);
+        severities.push(severity);
+      },
       setStatus(key: string, text: string | undefined) {
         assert.equal(key, "pi-balance");
         statuses.push(text);
@@ -33,7 +38,7 @@ function harness(resolveKey: (provider: string) => Promise<string | undefined>) 
     },
   } as unknown as ExtensionCommandContext;
   extension(pi);
-  return { notices, statuses, ctx, run: (args = "") => handler(args, ctx), handler, shutdown: () => shutdown() };
+  return { notices, severities, statuses, ctx, run: (args = "") => handler(args, ctx), handler, shutdown: () => shutdown() };
 }
 
 test("Pi 接入：每次通过当前 modelRegistry 解析 DeepSeek 凭据，防重复及会话取消", async () => {
@@ -47,9 +52,6 @@ test("Pi 接入：每次通过当前 modelRegistry 解析 DeepSeek 凭据，防�
   });
   let requests = 0;
   try {
-    await h.run("other");
-    assert.match(h.notices.pop()!, /Only DeepSeek/);
-    assert.equal(resolutions, 0);
     globalThis.fetch = async (_url, init) => {
       requests++;
       assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${key}`);
@@ -58,7 +60,7 @@ test("Pi 接入：每次通过当前 modelRegistry 解析 DeepSeek 凭据，防�
     await h.run();
     assert.match(h.notices.pop()!, /Total: 10.00/);
     key = "sk-updated";
-    await h.run("deepseek");
+    await h.run();
     assert.equal(requests, 2);
     assert.equal(resolutions, 2);
     globalThis.fetch = async () => new Response("sk-secret-remote-error", { status: 401 });
@@ -86,6 +88,55 @@ test("Pi 接入：每次通过当前 modelRegistry 解析 DeepSeek 凭据，防�
     await h.handler("", { ...h.ctx, hasUI: false });
     assert.equal(h.notices.length, count);
     assert.equal(resolutions, before);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("切换模型后只查当前提供商，未选模型或不支持时不读凭据、不发请求", async () => {
+  const previousFetch = globalThis.fetch;
+  const providers: string[] = [];
+  const requests: string[] = [];
+  const token = `header.${Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": { chatgpt_account_id: "test-account" },
+  })).toString("base64url")}.signature`;
+  const h = harness(async provider => {
+    providers.push(provider);
+    return provider === "deepseek" ? "sk-deepseek-test" : token;
+  });
+  const ctxWithProvider = (provider: string): ExtensionCommandContext =>
+    ({ ...h.ctx, model: { ...h.ctx.model!, provider } });
+  try {
+    globalThis.fetch = async (url, init) => {
+      requests.push(String(url));
+      if (String(url) === "https://api.deepseek.com/user/balance") {
+        return Response.json({ is_available: true, balance_infos: [] });
+      }
+      assert.equal(new Headers(init?.headers).get("ChatGPT-Account-Id"), "test-account");
+      return Response.json({ plan_type: "plus", rate_limit: {
+        primary_window: { used_percent: 18, limit_window_seconds: 18000 },
+      } });
+    };
+    await h.handler("", { ...h.ctx, model: undefined });
+    assert.match(h.notices.at(-1)!, /No model selected/);
+    assert.equal(h.severities.at(-1), "error");
+    await h.handler("", ctxWithProvider("openai"));
+    assert.match(h.notices.at(-1)!, /not supported.*"openai"/);
+    assert.equal(h.severities.at(-1), "error");
+    await h.run("openai-codex");
+    assert.match(h.notices.at(-1)!, /Usage: \/balance/);
+    assert.deepEqual(providers, []);
+    assert.deepEqual(requests, []);
+
+    await h.run();
+    assert.match(h.notices.at(-1)!, /DeepSeek account/);
+    await h.handler("", ctxWithProvider("openai-codex"));
+    assert.match(h.notices.at(-1)!, /Codex usage · Plus\n5-hour: 82% left/);
+    assert.equal(h.severities.at(-1), "info");
+    assert.deepEqual(providers, ["deepseek", "openai-codex"]);
+    assert.deepEqual(requests, [
+      "https://api.deepseek.com/user/balance", "https://chatgpt.com/backend-api/wham/usage",
+    ]);
   } finally {
     globalThis.fetch = previousFetch;
   }

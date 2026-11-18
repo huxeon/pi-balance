@@ -1,11 +1,12 @@
 {
   "name": "pi-balance",
   "version": "0.1.0",
-  "description": "Pi balance viewer for DeepSeek",
+  "description": "Pi balance and quota viewer for DeepSeek and OpenAI Codex",
   "type": "module",
   "keywords": [
     "pi-package",
-    "deepseek"
+    "deepseek",
+    "openai-codex"
   ],
   "files": [
     "index.ts",

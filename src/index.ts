@@ -1,5 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { BalanceError, fetchBalance, formatBalance } from "./balance.ts";
+import { fetchBalance, formatBalance } from "./balance.ts";
+import { fetchCodexUsage, formatCodexUsage } from "./codex.ts";
+import { BalanceError } from "./request.ts";
 import { BalancePanel } from "./ui.ts";
 
 export default function balanceExtension(pi: ExtensionAPI): void {
@@ -14,15 +16,21 @@ export default function balanceExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("balance", {
-    description: "Show DeepSeek account balance (/balance [deepseek])",
-    getArgumentCompletions: prefix => ["deepseek"]
-      .filter(value => value.startsWith(prefix))
-      .map(value => ({ value, label: value })),
+    description: "Show balance or quota for the current model's provider",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return;
-      const provider = args.trim().toLowerCase() || "deepseek";
-      if (provider !== "deepseek") {
-        ctx.ui.notify("Only DeepSeek is supported. Usage: /balance [deepseek]", "warning");
+      if (args.trim()) {
+        ctx.ui.notify("Usage: /balance (uses the current model's provider)", "error");
+        return;
+      }
+      const provider = ctx.model?.provider;
+      if (!provider) {
+        ctx.ui.notify("No model selected. Use /model to select a DeepSeek or Codex model.", "error");
+        return;
+      }
+      if (provider !== "deepseek" && provider !== "openai-codex") {
+        const name = /^[a-z0-9_.-]{1,80}$/i.test(provider) ? `provider "${provider}"` : "the current provider";
+        ctx.ui.notify(`Balance is not supported for ${name}. Supported: deepseek, openai-codex.`, "error");
         return;
       }
       if (pending) {
@@ -37,18 +45,21 @@ export default function balanceExtension(pi: ExtensionAPI): void {
       const query = async (signal: AbortSignal) => {
         signal.throwIfAborted();
         // Delegate all credential sources and precedence to the running Pi instance.
-        const apiKey = await ctx.modelRegistry.getApiKeyForProvider("deepseek");
+        const apiKey = await ctx.modelRegistry.getApiKeyForProvider(provider);
         signal.throwIfAborted();
         if (!apiKey) {
-          throw new BalanceError("No DeepSeek API key available. Use /login deepseek or set DEEPSEEK_API_KEY.");
+          throw new BalanceError(provider === "deepseek"
+            ? "No DeepSeek API key available. Use /login deepseek or set DEEPSEEK_API_KEY."
+            : "No Codex OAuth access token available. Use /login openai-codex in Pi.");
         }
-        return fetchBalance({ apiKey }, signal);
+        return provider === "deepseek" ? fetchBalance({ apiKey }, signal) : fetchCodexUsage(apiKey, signal);
       };
 
       try {
         if (ctx.mode === "tui") {
           await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
             current = new BalancePanel({
+              title: provider === "deepseek" ? "DeepSeek balance" : "Codex usage",
               theme,
               keybindings,
               requestRender: () => tui.requestRender(),
@@ -67,7 +78,11 @@ export default function balanceExtension(pi: ExtensionAPI): void {
         } else {
           const balance = await query(controller.signal);
           if (!controller.signal.aborted) {
-            ctx.ui.notify(formatBalance(balance), balance.is_available ? "info" : "warning");
+            if ("balance_infos" in balance) {
+              ctx.ui.notify(formatBalance(balance), balance.is_available ? "info" : "warning");
+            } else {
+              ctx.ui.notify(formatCodexUsage(balance), balance.limitReached ? "warning" : "info");
+            }
           }
         }
       } catch (error) {

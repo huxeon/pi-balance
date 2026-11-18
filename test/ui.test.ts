@@ -3,7 +3,9 @@ import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS, visibleWidth } from "@earendil-works/pi-tui";
-import { BalanceError, type Balance } from "../src/balance.ts";
+import type { Balance } from "../src/balance.ts";
+import { parseCodexUsage } from "../src/codex.ts";
+import { BalanceError } from "../src/request.ts";
 import { BalancePanel } from "../src/ui.ts";
 
 // ANSI styling ensures width tests exercise styled CJK content, not just plain text.
@@ -15,12 +17,16 @@ const balance: Balance = { is_available: true, balance_infos: [
   { currency: "CNY", total_balance: "110.00", granted_balance: "10.00", topped_up_balance: "100.00" },
   { currency: "USD", total_balance: "0.00000001", granted_balance: "0.00", topped_up_balance: "0.00000001" },
 ] };
-function harness(query: (signal: AbortSignal) => Promise<Balance>, customCancel = false) {
+function harness(
+  query: ConstructorParameters<typeof BalancePanel>[0]["query"],
+  customCancel = false,
+  title = "DeepSeek balance",
+) {
   let closed = 0;
   let renders = 0;
   const keybindings = new KeybindingsManager(TUI_KEYBINDINGS,
     customCancel ? { "tui.select.cancel": "ctrl+q", "tui.select.confirm": "ctrl+r" } : undefined);
-  const panel = new BalancePanel({ theme, keybindings, query,
+  const panel = new BalancePanel({ title, theme, keybindings, query,
     requestRender: () => { renders++; }, done: () => { closed++; } });
   return { panel, get closed() { return closed; }, get renders() { return renders; } };
 }
@@ -42,6 +48,32 @@ test("精简余额面板：边框、金额、双币种和快捷键", async () =>
   for (const removed of ["Provider", "账户可用", "更新于", "总可用余额"]) assert.ok(!content.includes(removed));
   h.panel.invalidate();
   assert.match(plain(h.panel), /110.00 CNY/);
+});
+
+test("Codex 面板按终端宽度显示进度条，并始终保留百分比和重置时间", async () => {
+  const resetAt = Math.floor(Date.now() / 1000) + 60;
+  const h = harness(async () => parseCodexUsage({
+    plan_type: "plus",
+    rate_limit: {
+      primary_window: { used_percent: 18, limit_window_seconds: 18000, reset_at: resetAt },
+      secondary_window: { used_percent: 3, limit_window_seconds: 604800 },
+    },
+    credits: { has_credits: true, unlimited: false, balance: "12.50" },
+  }), false, "Codex usage");
+  await h.panel.refresh();
+  const wide = plain(h.panel, 64);
+  assert.match(wide, /Codex usage · Plus/);
+  assert.match(wide, /5-hour\s+████████░░\s+82% left/);
+  assert.match(wide, /Weekly\s+█████████░\s+97% left/);
+  assert.match(wide, /Credits: 12\.50/);
+  const narrow = plain(h.panel, 24);
+  assert.doesNotMatch(narrow, /[█░]/);
+  assert.match(narrow, /5-hour: 82% left/);
+  assert.match(narrow, /Resets .* at \d\d:\d\d/);
+  assert.match(narrow, /Weekly: 97% left/);
+  for (const width of [0, 1, 2, 12, 24, 40, 64]) {
+    for (const line of h.panel.render(width)) assert.ok(visibleWidth(line) <= width);
+  }
 });
 
 test("内置对话框约定：单标题、留白、分组快捷键和主题色层级", async () => {
@@ -116,6 +148,7 @@ test("错误在面板内显示，可按 r/Enter 重试，失败时不展示旧�
 test("刷新键去重，禁用键位时不生成空操作提示", async () => {
   for (const confirm of [[], ["r" as const]]) {
     const panel = new BalancePanel({
+      title: "DeepSeek balance",
       theme,
       keybindings: { matches: () => false, getKeys: action => action === "tui.select.confirm" ? confirm : [] },
       query: async () => balance,

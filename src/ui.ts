@@ -1,19 +1,24 @@
 import { DynamicBorder, type Theme } from "@earendil-works/pi-coding-agent";
-import { Container, Spacer, Text, matchesKey, truncateToWidth, type KeybindingsManager } from "@earendil-works/pi-tui";
-import { BalanceError, type Balance } from "./balance.ts";
+import { Container, Spacer, Text, matchesKey, truncateToWidth, visibleWidth, type KeybindingsManager } from "@earendil-works/pi-tui";
+import type { Balance } from "./balance.ts";
+import { summarizeWindow, type CodexUsage } from "./codex.ts";
+import { BalanceError } from "./request.ts";
+
+type AccountDetails = Balance | CodexUsage;
 
 interface PanelOptions {
+  title: string;
   theme: Theme;
   keybindings: Pick<KeybindingsManager, "matches" | "getKeys">;
   requestRender: () => void;
   done: () => void;
-  query: (signal: AbortSignal) => Promise<Balance>;
+  query: (signal: AbortSignal) => Promise<AccountDetails>;
 }
 
 type PanelState =
   | { kind: "idle" }
   | { kind: "loading"; controller: AbortController }
-  | { kind: "ready"; balance: Balance }
+  | { kind: "ready"; balance: AccountDetails }
   | { kind: "error"; message: string };
 
 /** Inline balance view following Pi's built-in dialog conventions. */
@@ -72,22 +77,46 @@ export class BalancePanel {
     const text = (value: string) => frame.addChild(new Text(value, 1, 0));
     frame.addChild(border());
     frame.addChild(new Spacer(1));
-    text(th.fg("accent", th.bold("DeepSeek balance")));
+    const details = state.kind === "ready" ? state.balance : undefined;
+    const usage = details && !("balance_infos" in details) ? details : undefined;
+    const title = this.options.title;
+    text(th.fg("accent", th.bold(title)) + (usage ? th.fg("muted", ` · ${usage.plan}`) : ""));
     frame.addChild(new Spacer(1));
 
     if (state.kind === "loading") {
       text(th.fg("muted", "Loading balance…"));
     } else if (state.kind === "error") {
       text(th.fg("error", state.message));
-    } else if (state.kind === "ready") {
-      const balance = state.balance;
-      if (!balance.is_available) text(th.fg("warning", "Account unavailable"));
-      for (const [index, info] of balance.balance_infos.entries()) {
+    } else if (details && "balance_infos" in details) {
+      if (!details.is_available) text(th.fg("warning", "Account unavailable"));
+      for (const [index, info] of details.balance_infos.entries()) {
         if (index > 0) frame.addChild(new Spacer(1));
         text(`${th.fg("text", th.bold(info.total_balance))} ${th.fg("muted", info.currency)}`);
         text(th.fg("muted", `Granted ${info.granted_balance} · Topped up ${info.topped_up_balance}`));
       }
-      if (!balance.balance_infos.length) text(th.fg("muted", "No balance details available"));
+      if (!details.balance_infos.length) text(th.fg("muted", "No balance details available"));
+    } else if (usage) {
+      if (usage.limitReached) text(th.fg("warning", "Usage limit reached"));
+      const now = new Date();
+      const windows = usage.windows.map(window => summarizeWindow(window, now));
+      const labelWidth = Math.max(0, ...windows.map(window => window.label.length));
+      const showBars = windows.every(({ reset }) => labelWidth + 2 + 10 + 2 + 9 +
+        (reset ? 3 + visibleWidth(reset) : 0) <= renderWidth - 2);
+      for (const { label, remaining, reset } of windows) {
+        const left = th.fg("text", th.bold(`${remaining}% left`));
+        const resetHint = reset ? th.fg("muted", `   ${reset}`) : "";
+        if (showBars) {
+          const filled = Math.floor(remaining / 10);
+          const bar = th.fg("accent", "█".repeat(filled)) + th.fg("dim", "░".repeat(10 - filled));
+          const padding = " ".repeat(3 - String(remaining).length);
+          text(`${label.padEnd(labelWidth)}  ${bar}  ${padding}${left}${resetHint}`);
+        } else {
+          text(`${label}: ${left}`);
+          if (reset) text(th.fg("muted", reset));
+        }
+      }
+      if (!windows.length) text(th.fg("muted", "No usage windows available"));
+      if (usage.credits !== null) text(th.fg("muted", `Credits: ${usage.credits}`));
     }
 
     frame.addChild(new Spacer(1));
